@@ -1,13 +1,19 @@
 use axum::{
-    Json, Router, extract::State, http::StatusCode, response::{IntoResponse, Redirect}, routing::{get, post}
+    Router,
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Redirect},
+    routing::{get, post},
 };
-use axum_extra::{
-    extract::cookie::{Cookie, CookieJar},
-};
+use axum_extra::extract::cookie::{Cookie, CookieJar};
 use serde::{Deserialize, Serialize};
-use std::{sync::Arc};
+use std::sync::Arc;
 use tokio::{net::TcpListener, sync::Mutex};
 use uuid::Uuid;
+
+use crate::error::BackendError;
+
+mod error;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Session {
@@ -50,7 +56,7 @@ async fn main() {
     let state = Arc::new(Mutex::new(DaemonState::default()));
 
     let app = Router::new()
-		/*TO REMOVE */.route("/", get(test_route))
+        .route("/", get(test_route))
         .route("/connect", get(connect_client))
         .route("/gen_session", post(create_session))
         .with_state(state);
@@ -59,21 +65,19 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-/*TO REMOVE */
-async fn test_route(
-	State(state): State<Arc<Mutex<DaemonState>>>
-) -> Json<Vec<Session>> {
-	let state = state.lock().await;
-	Json(state.running_sessions.clone())
+async fn test_route() -> Result<String, BackendError> {
+    tokio::fs::read_to_string("index.html")
+        .await
+        .map_err(|_| BackendError::InternalError)
 }
 
 async fn connect_client(
     State(state): State<Arc<Mutex<DaemonState>>>,
     jar: CookieJar,
 ) -> impl IntoResponse {
-	if let Some(s_id) = jar.get("session_id") {
-		let mut state = state.lock().await;
-		//TODO implem server connect
+    if let Some(s_id) = jar.get("session_id") {
+        let mut state = state.lock().await;
+        //TODO implem server connect
         (StatusCode::OK, "").into_response()
     } else {
         Redirect::to("/gen_session").into_response()
@@ -83,7 +87,7 @@ async fn connect_client(
 async fn create_session(
     State(state): State<Arc<Mutex<DaemonState>>>,
     jar: CookieJar,
-) -> Result<(CookieJar, Redirect), StatusCode> {
+) -> Result<(CookieJar, Redirect), BackendError> {
     let session_id = Uuid::new_v4();
     let mut state = state.lock().await;
     if let Some(port_state) = state
@@ -102,5 +106,5 @@ async fn create_session(
             Redirect::to("/connect"),
         ));
     }
-    Err(StatusCode::SERVICE_UNAVAILABLE)
+    Err(BackendError::NoSlotsAvailable)
 }
