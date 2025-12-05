@@ -56,7 +56,7 @@ async fn main() {
     let state = Arc::new(Mutex::new(DaemonState::default()));
 
     let app = Router::new()
-        .route("/", get(test_route))
+        .route("/", get(index))
         .route("/connect", get(connect_client))
         .route("/gen_session", post(create_session))
         .with_state(state);
@@ -65,7 +65,7 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn test_route() -> Result<String, BackendError> {
+async fn index() -> Result<String, BackendError> {
     tokio::fs::read_to_string("index.html")
         .await
         .map_err(|_| BackendError::InternalError)
