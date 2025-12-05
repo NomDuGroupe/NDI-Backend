@@ -1,33 +1,106 @@
-use axum::{Router, extract::State, routing::get};
+use axum::{
+    Json, Router, extract::State, http::StatusCode, response::{IntoResponse, Redirect}, routing::{get, post}
+};
+use axum_extra::{
+    extract::cookie::{Cookie, CookieJar},
+};
+use serde::{Deserialize, Serialize};
+use std::{sync::Arc};
 use tokio::{net::TcpListener, sync::Mutex};
-use serde::{Serialize, Deserialize};
-use std::sync::Arc;
+use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct Session {
-	cookie_user: String,
-	username: String,
-	port: u16,
+    session_id: String,
+    port: u16,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+struct AvailablePort {
+    port: u16,
+    is_available: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct DaemonState {
-	running_sessions: Vec<Session>,
+    running_sessions: Vec<Session>,
+    available_ports: Vec<AvailablePort>,
+}
+
+impl Default for DaemonState {
+    fn default() -> Self {
+        DaemonState {
+            running_sessions: Vec::new(),
+            available_ports: {
+                let mut vector = Vec::<AvailablePort>::with_capacity(10);
+                (3500..3510).for_each(|x| {
+                    vector.push(AvailablePort {
+                        port: x,
+                        is_available: true,
+                    })
+                });
+                vector
+            },
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() {
-	let state = Arc::new(Mutex::new(DaemonState::default()));
+    let state = Arc::new(Mutex::new(DaemonState::default()));
 
-	let app = Router::new().route("/", get(recieve_client_request));
+    let app = Router::new()
+		/*TO REMOVE */.route("/", get(test_route))
+        .route("/connect", get(connect_client))
+        .route("/gen_session", post(create_session))
+        .with_state(state);
 
-	let listener = TcpListener::bind("0.0.0.0:3001").await.unwrap();
-	axum::serve(listener, app).await.unwrap();
+    let listener = TcpListener::bind("0.0.0.0:3001").await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
 
-async fn recieve_client_request(
+/*TO REMOVE */
+async fn test_route(
 	State(state): State<Arc<Mutex<DaemonState>>>
-) -> &'static str {
-	//let mut state = state.lock().await;
-	"hello"
+) -> Json<Vec<Session>> {
+	let state = state.lock().await;
+	Json(state.running_sessions.clone())
+}
+
+async fn connect_client(
+    State(state): State<Arc<Mutex<DaemonState>>>,
+    jar: CookieJar,
+) -> impl IntoResponse {
+	if let Some(s_id) = jar.get("session_id") {
+		let mut state = state.lock().await;
+		//TODO implem server connect
+        (StatusCode::OK, "").into_response()
+    } else {
+        Redirect::to("/gen_session").into_response()
+    }
+}
+
+async fn create_session(
+    State(state): State<Arc<Mutex<DaemonState>>>,
+    jar: CookieJar,
+) -> Result<(CookieJar, Redirect), StatusCode> {
+    let session_id = Uuid::new_v4();
+    let mut state = state.lock().await;
+    if let Some(port_state) = state
+        .available_ports
+        .iter()
+        .copied()
+        .find(|p| p.is_available)
+    {
+        //TODO: Create session on server !!
+        state.running_sessions.push(Session {
+            session_id: session_id.to_string(),
+            port: port_state.port,
+        });
+        return Ok((
+            jar.add(Cookie::new("session_id", session_id.to_string())),
+            Redirect::to("/connect"),
+        ));
+    }
+    Err(StatusCode::SERVICE_UNAVAILABLE)
 }
