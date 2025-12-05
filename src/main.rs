@@ -37,16 +37,12 @@ impl Default for DaemonState {
     fn default() -> Self {
         DaemonState {
             running_sessions: Vec::new(),
-            available_ports: {
-                let mut vector = Vec::<AvailablePort>::with_capacity(10);
-                (3500..3510).for_each(|x| {
-                    vector.push(AvailablePort {
-                        port: x,
-                        is_available: true,
-                    })
-                });
-                vector
-            },
+            available_ports: (3500..3510)
+                .map(|p| AvailablePort {
+                    port: p,
+                    is_available: true,
+                })
+                .collect(),
         }
     }
 }
